@@ -27,3 +27,10 @@ ACTIVITY_STATUSES = (
 
 # Stable keys of the five screening activities; they match the Flutter catalog.
 SCREENING_ACTIVITY_KEYS = ("handwriting", "reading", "phonological", "ran", "memory")
+
+# Screening-model inference for a completed assessment. NULL means inference was
+# never requested. A saved result is the ScreeningResult row itself.
+INFERENCE_PENDING = "pending"
+INFERENCE_COMPLETED = "completed"
+INFERENCE_FAILED = "failed"
+INFERENCE_STATUSES = (INFERENCE_PENDING, INFERENCE_COMPLETED, INFERENCE_FAILED)

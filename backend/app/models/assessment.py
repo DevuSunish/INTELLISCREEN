@@ -42,6 +42,10 @@ class Assessment(Base):
 
     completed_at = Column(DateTime(timezone=True), nullable=True)
 
+    # Screening-model inference state; see app/core/constants.py.
+    inference_status = Column(String(20), nullable=True)
+    inference_error = Column(String(500), nullable=True)
+
     activities = relationship(
         "ActivityStatus",
         back_populates="assessment",

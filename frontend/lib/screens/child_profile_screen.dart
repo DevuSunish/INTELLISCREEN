@@ -586,6 +586,23 @@ class _ChildProfileScreenState extends State<ChildProfileScreen> {
   }
 }
 
+/// Explains why a saved assessment has no screening result.
+String _noResultText(AssessmentSummary record) {
+  if (record.status != AssessmentStatus.completed) {
+    return 'No result. Screening is only available for completed assessments.';
+  }
+  switch (record.inferenceStatus) {
+    case InferenceStatus.pending:
+      return 'Screening model run in progress. No result yet.';
+    case InferenceStatus.failed:
+      return 'The screening model run failed, so no result was saved. It can be retried.';
+    case InferenceStatus.completed:
+    case null:
+      return 'No screening result has been generated. Completing activities does not produce a result; '
+          'the screening model is run separately and is not connected yet.';
+  }
+}
+
 /// Card displaying a saved assessment of a child, as returned by the backend.
 class _AssessmentCardItem extends StatelessWidget {
   final AssessmentSummary record;
@@ -775,9 +792,7 @@ class _AssessmentCardItem extends StatelessWidget {
                         'Confidence: ${(result.confidenceScore! * 100).toStringAsFixed(0)}%',
                       if (result.modelVersion != null) 'Model: ${result.modelVersion}',
                     ].join(' • ')
-                  : record.status == AssessmentStatus.completed
-                      ? 'No screening result has been generated. The automated screening model is not connected yet, so completing activities does not produce a result.'
-                      : 'No result. Results can only be added to completed assessments.',
+                  : _noResultText(record),
               style: const TextStyle(
                 fontSize: 12,
                 height: 1.4,

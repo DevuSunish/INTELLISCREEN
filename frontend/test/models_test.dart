@@ -27,6 +27,7 @@ Map<String, dynamic> progressJson() => {
           'assessment_status': 'completed',
           'assessment_date': '2026-10-20T09:00:00Z',
           'completed_at': '2026-10-20T09:30:00Z',
+          'inference_status': 'completed',
           'activities': [
             for (final key in ['handwriting', 'reading', 'phonological', 'ran', 'memory'])
               {'id': 2, 'assessment_id': 30, 'activity_key': key, 'status': 'completed'},
@@ -128,9 +129,11 @@ void main() {
       expect(open.statusOf('memory'), ActivityStatus.notStarted);
       expect(open.result, isNull);
       expect(open.hasResult, isFalse);
+      expect(open.inferenceStatus, isNull);
 
       final done = progress.history.last;
       expect(done.completedActivityCount, 5);
+      expect(done.inferenceStatus, InferenceStatus.completed);
       expect(done.result!.resultCategory, 'monitor');
       expect(done.result!.confidenceScore, 0.8);
       expect(done.result!.modalityScores, {'reading': 0.7, 'writing': 1.0});
@@ -161,6 +164,10 @@ void main() {
       final badStatus = progressJson();
       (badStatus['assessment_history'] as List).first['assessment_status'] = 'pending';
       expect(() => ChildProgress.fromJson(badStatus), throwsFormatException);
+
+      final badInference = progressJson();
+      (badInference['assessment_history'] as List).first['inference_status'] = 'done';
+      expect(() => ChildProgress.fromJson(badInference), throwsFormatException);
     });
 
     test('copyWithActivity updates a single activity', () {

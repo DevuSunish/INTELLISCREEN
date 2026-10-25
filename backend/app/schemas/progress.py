@@ -13,6 +13,8 @@ class AssessmentHistoryItem(BaseModel):
     updated_at: UTCDateTime | None = None
     completed_at: UTCDateTime | None = None
     activities: list[ActivityStatusResponse]
+    inference_status: str | None = None
+    inference_error: str | None = None
     result: ScreeningResultResponse | None = None
 
 

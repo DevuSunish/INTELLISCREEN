@@ -1,5 +1,7 @@
 # INTELLISCREEN: implementation notes
 
+Handoff guide for the screening-model work: [docs/MULTIMODAL_INTEGRATION.md](docs/MULTIMODAL_INTEGRATION.md).
+
 ## Running
 
 Backend (from `backend/`):
@@ -17,6 +19,7 @@ never drops data) and seeds the four demo profiles if they are missing.
 | `INTELLISCREEN_TOKEN_SECRET` | random value generated once into `backend/.intelliscreen_secret` (git-ignored) | Token signing secret. Set it explicitly in any shared deployment. |
 | `INTELLISCREEN_DATABASE_URL` | `sqlite:///<backend>/intelliscreen.db` | Database location (independent of the working directory). |
 | `INTELLISCREEN_ACCESS_TOKEN_EXPIRE_MINUTES` | `720` | Token lifetime. |
+| `INTELLISCREEN_SCREENING_ADAPTER` | unset | `package.module:factory` of the screening model adapter. Unset: no model, screening requests return 503. |
 
 Frontend (from `frontend/`): `flutter run -d linux`. The API defaults to
 `http://127.0.0.1:8000/api/v1` (Linux desktop/web) and `http://10.0.2.2:8000/api/v1`
@@ -39,7 +42,8 @@ Everything else requires `Authorization: Bearer <token>`.
 | `PATCH /assessments/{id}/status` | `{"status": "completed" \| "cancelled"}` |
 | `GET /assessments/{id}/activities` | Activity statuses |
 | `PUT /assessments/{id}/activities/{key}` | `{"status": ...}`; creates or updates (idempotent) |
-| `POST /results/`, `GET /results/`, `GET /results/{id}` | Screening model output |
+| `POST /assessments/{id}/screening` | Run the configured screening model for a completed assessment and save its output |
+| `POST /results/`, `GET /results/`, `GET /results/{id}` | Store model output produced elsewhere / read saved results |
 | `GET /progress/{child_id}` | Counts and full history (activities, result) for the account |
 
 ### Status vocabulary
@@ -85,8 +89,9 @@ Everything else requires `Authorization: Bearer <token>`.
 ## Screening model
 
 No screening model is integrated. Completing an assessment records the completed
-activities only; no result is created, and the app says that no result has been
-generated. The result endpoints are ready for real model output.
+activities only; it never starts inference or creates a result. The adapter
+interface (`backend/app/screening/`), the inference lifecycle (`inference_status`)
+and the result endpoints are ready for real model output; see the handoff guide.
 
 ## Tests
 

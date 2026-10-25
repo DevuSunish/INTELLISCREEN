@@ -60,6 +60,18 @@ extension AssessmentStatusApi on AssessmentStatus {
   }
 }
 
+/// Screening-model inference state of a completed assessment.
+/// Null on an assessment means inference was never requested.
+enum InferenceStatus { pending, completed, failed }
+
+InferenceStatus? _inferenceStatusFromApi(Object? value) {
+  if (value == null) return null;
+  for (final status in InferenceStatus.values) {
+    if (status.name == value) return status;
+  }
+  throw FormatException('Unknown inference status "$value"');
+}
+
 /// Output of the screening model, present only when one was actually saved.
 class ScreeningResultSummary {
   final int id;
@@ -107,6 +119,7 @@ class AssessmentSummary {
   final DateTime? updatedAt;
   final DateTime? completedAt;
   final Map<String, ActivityStatus> activityStatuses;
+  final InferenceStatus? inferenceStatus;
   final ScreeningResultSummary? result;
   final bool hasResult;
 
@@ -118,6 +131,7 @@ class AssessmentSummary {
     this.updatedAt,
     this.completedAt,
     this.activityStatuses = const {},
+    this.inferenceStatus,
     this.result,
     this.hasResult = false,
   });
@@ -132,6 +146,7 @@ class AssessmentSummary {
       updatedAt: readOptionalDate(json, 'updated_at'),
       completedAt: readOptionalDate(json, 'completed_at'),
       activityStatuses: _parseActivities(json['activities']),
+      inferenceStatus: _inferenceStatusFromApi(json['inference_status']),
       hasResult: readBool(json, 'has_result'),
     );
   }
@@ -147,6 +162,7 @@ class AssessmentSummary {
       updatedAt: readOptionalDate(json, 'updated_at'),
       completedAt: readOptionalDate(json, 'completed_at'),
       activityStatuses: _parseActivities(json['activities']),
+      inferenceStatus: _inferenceStatusFromApi(json['inference_status']),
       result: result == null ? null : ScreeningResultSummary.fromJson(asJsonMap(result)),
       hasResult: result != null,
     );
@@ -176,6 +192,7 @@ class AssessmentSummary {
       updatedAt: updatedAt,
       completedAt: completedAt,
       activityStatuses: {...activityStatuses, activityKey: status},
+      inferenceStatus: inferenceStatus,
       result: result,
       hasResult: hasResult,
     );

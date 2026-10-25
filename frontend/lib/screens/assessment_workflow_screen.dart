@@ -76,7 +76,7 @@ class _AssessmentWorkflowScreenState extends State<AssessmentWorkflowScreen> {
 
     _showMessage(
       'Assessment completed and saved for ${child.name}. '
-      'No screening result was generated because the screening model is not connected.',
+      'No screening result was generated; the screening model is run separately.',
     );
     if (mounted) Navigator.of(context).pop();
   }

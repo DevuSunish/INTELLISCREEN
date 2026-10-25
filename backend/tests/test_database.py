@@ -96,6 +96,8 @@ def test_upgrades_database_created_by_first_release(tmp_path):
             modality_scores JSON, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP);
         INSERT INTO child_profiles (id, participant_code, age_years) VALUES (1, 'demo-1', 7), (5, 'legacy', 8);
         INSERT INTO assessments (id, child_id, assessment_type, status) VALUES (1, 1, 'screening', 'pending');
+        INSERT INTO assessments (id, child_id, assessment_type, status) VALUES (2, 1, 'screening', 'completed');
+        INSERT INTO screening_results (assessment_id, model_version, result_category) VALUES (2, 'old', 'c');
         """
     )
     connection.commit()
@@ -106,18 +108,21 @@ def test_upgrades_database_created_by_first_release(tmp_path):
     init_db(engine)
 
     columns = {c["name"] for c in inspect(engine).get_columns("assessments")}
-    assert {"user_id", "updated_at", "completed_at"} <= columns
+    assert {"user_id", "updated_at", "completed_at", "inference_status", "inference_error"} <= columns
     assert "owner_id" in {c["name"] for c in inspect(engine).get_columns("child_profiles")}
 
     connection = sqlite3.connect(path)
     profiles = connection.execute(
         "SELECT id, participant_code FROM child_profiles ORDER BY id"
     ).fetchall()
-    assessment = connection.execute("SELECT id, status FROM assessments").fetchall()
+    assessment = connection.execute(
+        "SELECT id, status, inference_status FROM assessments ORDER BY id"
+    ).fetchall()
     connection.close()
 
     # Existing rows keep their ids; the missing demo profiles are added.
     assert profiles[0] == (1, "demo-1")
     assert (5, "legacy") in profiles
     assert sorted(code for _, code in profiles) == ["demo-1", "demo-2", "demo-3", "demo-4", "legacy"]
-    assert assessment == [(1, "in_progress")]
+    # A result saved before inference tracking counts as completed inference.
+    assert assessment == [(1, "in_progress", None), (2, "completed", "completed")]

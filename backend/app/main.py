@@ -10,12 +10,15 @@ from app.api.v1.endpoints.progress import router as progress_router
 from app.api.v1.endpoints.results import router as results_router
 from app.core.config import API_V1_PREFIX, APP_NAME, APP_VERSION, CORS_ORIGIN_REGEX
 from app.db.init_db import init_db
+from app.screening.dependencies import get_screening_adapter
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     # Tables exist and demo profiles are seeded before the first request.
     init_db()
+    # Fail at startup, not on first use, if the adapter setting is wrong.
+    get_screening_adapter()
     yield
 
 

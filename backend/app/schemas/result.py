@@ -5,8 +5,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from app.schemas.common import UTCDateTime
 
 
-class ScreeningResultCreate(BaseModel):
-    assessment_id: int = Field(gt=0)
+class ScreeningModelOutput(BaseModel):
+    """What a screening model produces. Validated before anything is saved."""
+
+    model_config = ConfigDict(extra="forbid")
+
     model_version: str = Field(min_length=1, max_length=50)
     result_category: str = Field(min_length=1, max_length=50)
     confidence_score: float | None = Field(default=None, ge=0, le=1)
@@ -27,6 +30,10 @@ class ScreeningResultCreate(BaseModel):
             if math.isnan(score) or not 0 <= score <= 1:
                 raise ValueError("Modality scores must be between 0 and 1")
         return value
+
+
+class ScreeningResultCreate(ScreeningModelOutput):
+    assessment_id: int = Field(gt=0)
 
 
 class ScreeningResultResponse(BaseModel):

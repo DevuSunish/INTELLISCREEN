@@ -28,3 +28,7 @@ PASSWORD_HASH_ITERATIONS = int(
 
 # Local origins allowed to call the API from a browser (Flutter web debug runs).
 CORS_ORIGIN_REGEX = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
+
+# Screening model adapter as "package.module:factory". Unset means no model is
+# connected; the rest of the application works without one.
+SCREENING_ADAPTER = os.environ.get("INTELLISCREEN_SCREENING_ADAPTER", "").strip()

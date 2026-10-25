@@ -42,6 +42,8 @@ class AssessmentResponse(BaseModel):
     updated_at: UTCDateTime | None = None
     completed_at: UTCDateTime | None = None
     activities: list[ActivityStatusResponse] = []
+    inference_status: str | None = None
+    inference_error: str | None = None
     has_result: bool = False
 
     model_config = ConfigDict(from_attributes=True)

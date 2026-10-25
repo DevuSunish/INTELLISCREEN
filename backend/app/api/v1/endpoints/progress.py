@@ -37,6 +37,8 @@ def get_child_progress(
             updated_at=assessment.updated_at,
             completed_at=assessment.completed_at,
             activities=assessment.activities,
+            inference_status=assessment.inference_status,
+            inference_error=assessment.inference_error,
             result=assessment.result,
         )
         for assessment in assessments

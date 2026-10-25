@@ -24,6 +24,10 @@ from app.schemas.assessment import (
     AssessmentStatusUpdate,
     AssessmentStatusValue,
 )
+from app.schemas.result import ScreeningResultResponse
+from app.screening.adapter import ScreeningModelAdapter
+from app.screening.dependencies import get_screening_adapter
+from app.screening.service import run_screening
 
 router = APIRouter(prefix="/assessments", tags=["Assessments"])
 
@@ -207,3 +211,29 @@ def set_activity_status(
 
     db.refresh(activity)
     return activity
+
+
+@router.post(
+    "/{assessment_id}/screening",
+    response_model=ScreeningResultResponse,
+    status_code=201,
+    responses={
+        200: {"description": "A result was already saved; the model was not run again"},
+        409: {"description": "The assessment is not completed"},
+        502: {"description": "The model failed or returned invalid output; retry is allowed"},
+        503: {"description": "No screening model is configured or it is unavailable"},
+    },
+)
+def request_screening(
+    assessment_id: int,
+    response: Response,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    adapter: ScreeningModelAdapter | None = Depends(get_screening_adapter),
+):
+    """Run the configured screening model for a completed assessment."""
+    assessment = get_owned_assessment(db, user, assessment_id)
+    result, created = run_screening(db, assessment, adapter)
+    if not created:
+        response.status_code = 200
+    return result

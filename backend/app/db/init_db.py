@@ -3,7 +3,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 
 from app import models  # noqa: F401  (registers every model on Base.metadata)
-from app.core.constants import ASSESSMENT_IN_PROGRESS
+from app.core.constants import ASSESSMENT_IN_PROGRESS, INFERENCE_COMPLETED
 from app.db.database import Base, engine
 from app.db.seed_demo_profiles import seed_demo_profiles
 
@@ -17,6 +17,8 @@ _ADDED_COLUMNS = {
         "user_id": "INTEGER REFERENCES users(id)",
         "updated_at": "DATETIME",
         "completed_at": "DATETIME",
+        "inference_status": "VARCHAR(20)",
+        "inference_error": "VARCHAR(500)",
     },
 }
 
@@ -44,6 +46,16 @@ def _upgrade_existing_tables(bind: Engine) -> None:
         connection.execute(
             text("UPDATE assessments SET status = :new WHERE status = 'pending'"),
             {"new": ASSESSMENT_IN_PROGRESS},
+        )
+
+        # Results saved before inference tracking existed count as completed inference.
+        connection.execute(
+            text(
+                "UPDATE assessments SET inference_status = :done "
+                "WHERE inference_status IS NULL "
+                "AND id IN (SELECT assessment_id FROM screening_results)"
+            ),
+            {"done": INFERENCE_COMPLETED},
         )
 
 
