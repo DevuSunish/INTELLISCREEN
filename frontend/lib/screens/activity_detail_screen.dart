@@ -1,24 +1,40 @@
 import 'package:flutter/material.dart';
 import '../models/child_record.dart';
+import '../services/api_client.dart';
+import '../state/assessment_controller.dart';
 
 /// Screen displaying details and protocol breakdown for a specific screening activity.
 /// Explains planned tasks without fabricating AI processing or clinical diagnoses.
-/// Allows updating activity status in temporary in-memory session state.
+/// Status changes are saved to the backend for the active assessment.
 class ActivityDetailScreen extends StatelessWidget {
-  final ChildRecord child;
+  final AssessmentController controller;
   final AssessmentActivity activity;
 
   const ActivityDetailScreen({
     super.key,
-    required this.child,
+    required this.controller,
     required this.activity,
   });
 
-  /// Updates the status of this activity in ChildrenStore.
-  void _setStatus(BuildContext context, ActivityStatus newStatus) {
-    childrenStore.updateActivityStatus(child.id, activity.id, newStatus);
+  ChildRecord get child => controller.child;
 
-    ScaffoldMessenger.of(context).showSnackBar(
+  /// Saves the new status of this activity, then confirms it.
+  Future<void> _setStatus(BuildContext context, ActivityStatus newStatus) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await controller.setActivityStatus(activity.id, newStatus);
+    } on ApiException catch (error) {
+      messenger.showSnackBar(
+        SnackBar(
+          backgroundColor: const Color(0xFFB91C1C),
+          behavior: SnackBarBehavior.floating,
+          content: Text('Could not save activity status: $error'),
+        ),
+      );
+      return;
+    }
+
+    messenger.showSnackBar(
       SnackBar(
         backgroundColor: const Color(0xFF0D9488),
         behavior: SnackBarBehavior.floating,
@@ -30,7 +46,7 @@ class ActivityDetailScreen extends StatelessWidget {
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                '${activity.title} marked as "${newStatus.label}".',
+                '${activity.title} saved as "${newStatus.label}".',
                 style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
               ),
             ),
@@ -69,14 +85,11 @@ class ActivityDetailScreen extends StatelessWidget {
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 580),
               child: ListenableBuilder(
-                listenable: childrenStore,
+                listenable: controller,
                 builder: (context, _) {
-                  // Re-fetch current activity status from store
-                  final session = childrenStore.getOrCreateSessionForChild(child);
-                  final currentActivity = session.activities.firstWhere(
-                    (a) => a.id == activity.id,
-                    orElse: () => activity,
-                  );
+                  final currentActivity = activity;
+                  final status = controller.statusOf(activity.id);
+                  final bool canEdit = controller.hasActiveAssessment && !controller.busy;
 
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -118,7 +131,7 @@ class ActivityDetailScreen extends StatelessWidget {
                                     ),
                                   ),
                                   Text(
-                                    '${child.grade} • Age ${child.age} yrs',
+                                    '${child.grade} • ${child.ageLabel}',
                                     style: const TextStyle(
                                       fontSize: 11,
                                       color: Color(0xFF64748B),
@@ -131,24 +144,24 @@ class ActivityDetailScreen extends StatelessWidget {
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                               decoration: BoxDecoration(
-                                color: currentActivity.status.bgColor,
+                                color: status.bgColor,
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   Icon(
-                                    currentActivity.status.icon,
+                                    status.icon,
                                     size: 13,
-                                    color: currentActivity.status.textColor,
+                                    color: status.textColor,
                                   ),
                                   const SizedBox(width: 5),
                                   Text(
-                                    currentActivity.status.label,
+                                    status.label,
                                     style: TextStyle(
                                       fontSize: 11,
                                       fontWeight: FontWeight.w700,
-                                      color: currentActivity.status.textColor,
+                                      color: status.textColor,
                                     ),
                                   ),
                                 ],
@@ -355,13 +368,20 @@ class ActivityDetailScreen extends StatelessWidget {
 
                       // Status control buttons for interactive testing
                       const Text(
-                        'Update Activity Status (Demo Session)',
+                        'Update Activity Status',
                         style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w700,
                           color: Color(0xFF0F172A),
                         ),
                       ),
+                      if (!controller.hasActiveAssessment) ...[
+                        const SizedBox(height: 4),
+                        const Text(
+                          'Start the assessment on the previous screen to record progress for this activity.',
+                          style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                        ),
+                      ],
                       const SizedBox(height: 8),
                       Row(
                         children: [
@@ -375,7 +395,7 @@ class ActivityDetailScreen extends StatelessWidget {
                                   borderRadius: BorderRadius.circular(10),
                                 ),
                               ),
-                              onPressed: () => _setStatus(context, ActivityStatus.inProgress),
+                              onPressed: canEdit ? () => _setStatus(context, ActivityStatus.inProgress) : null,
                               icon: const Icon(Icons.play_arrow_rounded, size: 16),
                               label: const Text('Mark In Progress'),
                             ),
@@ -390,7 +410,7 @@ class ActivityDetailScreen extends StatelessWidget {
                                   borderRadius: BorderRadius.circular(10),
                                 ),
                               ),
-                              onPressed: () => _setStatus(context, ActivityStatus.completed),
+                              onPressed: canEdit ? () => _setStatus(context, ActivityStatus.completed) : null,
                               icon: const Icon(Icons.check_rounded, size: 16),
                               label: const Text('Mark Completed'),
                             ),
@@ -400,7 +420,7 @@ class ActivityDetailScreen extends StatelessWidget {
                       const SizedBox(height: 8),
                       Center(
                         child: TextButton(
-                          onPressed: () => _setStatus(context, ActivityStatus.notStarted),
+                          onPressed: canEdit ? () => _setStatus(context, ActivityStatus.notStarted) : null,
                           child: const Text(
                             'Reset to Not Started',
                             style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),

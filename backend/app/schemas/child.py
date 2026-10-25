@@ -1,4 +1,6 @@
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.schemas.common import UTCDateTime
 
 
 class ChildProfileCreate(BaseModel):
@@ -10,4 +12,7 @@ class ChildProfileResponse(BaseModel):
     id: int
     participant_code: str
     age_years: int | None
+    is_demo: bool
+    created_at: UTCDateTime | None = None
+
     model_config = ConfigDict(from_attributes=True)

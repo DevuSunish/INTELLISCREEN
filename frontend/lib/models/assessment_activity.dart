@@ -7,6 +7,27 @@ enum ActivityStatus {
   completed,
 }
 
+/// Conversion to and from the backend's activity status vocabulary.
+extension ActivityStatusApi on ActivityStatus {
+  String get apiValue {
+    switch (this) {
+      case ActivityStatus.notStarted:
+        return 'not_started';
+      case ActivityStatus.inProgress:
+        return 'in_progress';
+      case ActivityStatus.completed:
+        return 'completed';
+    }
+  }
+
+  static ActivityStatus fromApi(String value) {
+    for (final status in ActivityStatus.values) {
+      if (status.apiValue == value) return status;
+    }
+    throw FormatException('Unknown activity status "$value"');
+  }
+}
+
 extension ActivityStatusExtension on ActivityStatus {
   String get label {
     switch (this) {
@@ -54,6 +75,7 @@ extension ActivityStatusExtension on ActivityStatus {
 }
 
 /// Represents one of the 5 core screening activities in INTELLISCREEN.
+/// The [id] is the stable activity key shared with the backend.
 class AssessmentActivity {
   final String id;
   final String title;
@@ -63,9 +85,8 @@ class AssessmentActivity {
   final String objective;
   final List<String> protocolSteps;
   final String observationalGuidance;
-  ActivityStatus status;
 
-  AssessmentActivity({
+  const AssessmentActivity({
     required this.id,
     required this.title,
     required this.shortDescription,
@@ -74,81 +95,19 @@ class AssessmentActivity {
     required this.objective,
     required this.protocolSteps,
     required this.observationalGuidance,
-    this.status = ActivityStatus.notStarted,
   });
-
-  AssessmentActivity copyWith({
-    String? id,
-    String? title,
-    String? shortDescription,
-    IconData? icon,
-    Color? accentColor,
-    String? objective,
-    List<String>? protocolSteps,
-    String? observationalGuidance,
-    ActivityStatus? status,
-  }) {
-    return AssessmentActivity(
-      id: id ?? this.id,
-      title: title ?? this.title,
-      shortDescription: shortDescription ?? this.shortDescription,
-      icon: icon ?? this.icon,
-      accentColor: accentColor ?? this.accentColor,
-      objective: objective ?? this.objective,
-      protocolSteps: protocolSteps ?? this.protocolSteps,
-      observationalGuidance: observationalGuidance ?? this.observationalGuidance,
-      status: status ?? this.status,
-    );
-  }
 }
 
-/// An active screening session associated with a specific child.
-class AssessmentSession {
-  final String id;
-  final String childId;
-  final String childName;
-  final DateTime startedAt;
-  final List<AssessmentActivity> activities;
-  bool isCompleted;
-
-  AssessmentSession({
-    required this.id,
-    required this.childId,
-    required this.childName,
-    required this.startedAt,
-    required this.activities,
-    this.isCompleted = false,
-  });
-
-  /// Count of completed activities.
-  int get completedCount =>
-      activities.where((a) => a.status == ActivityStatus.completed).length;
-
-  /// Count of in-progress activities.
-  int get inProgressCount =>
-      activities.where((a) => a.status == ActivityStatus.inProgress).length;
-
-  /// Overall session status.
-  String get statusLabel {
-    if (isCompleted || completedCount == activities.length) {
-      return 'Completed';
-    }
-    if (completedCount > 0 || inProgressCount > 0) {
-      return 'In Progress';
-    }
-    return 'Not Started';
-  }
-
-  /// Generates the standard five screening activities for a session.
-  static List<AssessmentActivity> createDefaultActivities() {
-    return [
-      AssessmentActivity(
+/// Catalog of the five screening activities, in workflow order.
+class ScreeningActivities {
+  static const List<AssessmentActivity> all = [
+    AssessmentActivity(
         id: 'handwriting',
         title: 'Handwriting Assessment',
         shortDescription:
             'Evaluate pencil grasp, letter formation, line adherence, and motor stroke consistency.',
         icon: Icons.draw_outlined,
-        accentColor: const Color(0xFF0D9488),
+        accentColor: Color(0xFF0D9488),
         objective:
             'Observe fine motor control, handwriting posture, and letter formation to detect early signs of dysgraphia.',
         protocolSteps: [
@@ -160,13 +119,13 @@ class AssessmentSession {
         observationalGuidance:
             'Document whether the child shakes their hand, complains of cramping, or switches grips during writing.',
       ),
-      AssessmentActivity(
+    AssessmentActivity(
         id: 'reading',
         title: 'Reading Assessment',
         shortDescription:
             'Assess single-word reading accuracy, phonemic decoding, and oral passage fluency.',
         icon: Icons.menu_book_rounded,
-        accentColor: const Color(0xFF0284C7),
+        accentColor: Color(0xFF0284C7),
         objective:
             'Measure oral reading fluency and sight-word decoding to identify potential phonological dyslexia flags.',
         protocolSteps: [
@@ -178,13 +137,13 @@ class AssessmentSession {
         observationalGuidance:
             'Listen for vowel confusion, phoneme skipping, and monotone delivery without natural phrasing.',
       ),
-      AssessmentActivity(
+    AssessmentActivity(
         id: 'phonological',
         title: 'Phonological Awareness',
         shortDescription:
             'Screen phoneme isolation, sound blending, rhyming pairs, and syllable manipulation.',
         icon: Icons.record_voice_over_outlined,
-        accentColor: const Color(0xFF0F766E),
+        accentColor: Color(0xFF0F766E),
         objective:
             'Evaluate auditory sensitivity to sound structures within spoken words without visual text.',
         protocolSteps: [
@@ -196,13 +155,13 @@ class AssessmentSession {
         observationalGuidance:
             'Check if the child relies on visual lip-reading or shows uncertainty with initial consonant blends.',
       ),
-      AssessmentActivity(
+    AssessmentActivity(
         id: 'ran',
         title: 'Rapid Automatized Naming (RAN)',
         shortDescription:
             'Measure speed of visual naming for familiar objects, colors, and letter sequences.',
         icon: Icons.timer_outlined,
-        accentColor: const Color(0xFFD97706),
+        accentColor: Color(0xFFD97706),
         objective:
             'Screen visual-to-phonological retrieval automaticity, a recognized core indicator in dyslexia screening.',
         protocolSteps: [
@@ -214,13 +173,13 @@ class AssessmentSession {
         observationalGuidance:
             'Note hesitation blocks, finger-tracking necessity, or perceptual visual jumps between rows.',
       ),
-      AssessmentActivity(
+    AssessmentActivity(
         id: 'memory',
         title: 'Memory Assessment',
         shortDescription:
             'Screen auditory short-term memory, verbal working memory, and sequential recall.',
         icon: Icons.psychology_outlined,
-        accentColor: const Color(0xFF6366F1),
+        accentColor: Color(0xFF6366F1),
         objective:
             'Screen working memory capacity needed to hold speech sounds while decoding and writing sentences.',
         protocolSteps: [
@@ -232,6 +191,5 @@ class AssessmentSession {
         observationalGuidance:
             'Document whether the child reverses number sequences or forgets initial sounds in multi-clause instructions.',
       ),
-    ];
-  }
+  ];
 }

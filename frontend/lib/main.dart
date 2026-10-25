@@ -1,14 +1,47 @@
 import 'package:flutter/material.dart';
 import 'models/child_record.dart';
 import 'screens/children_screen.dart';
+import 'services/api_client.dart';
+import 'services/auth_api_service.dart';
 
 void main() {
   runApp(const MyApp());
 }
 
 /// Root application widget configuring themes and initial routes.
-class MyApp extends StatelessWidget {
+/// Returns to the sign-in screen whenever the backend rejects the session.
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+  final GlobalKey<ScaffoldMessengerState> _messengerKey =
+      GlobalKey<ScaffoldMessengerState>();
+
+  @override
+  void initState() {
+    super.initState();
+    AuthSession.instance.addListener(_onSessionChanged);
+  }
+
+  @override
+  void dispose() {
+    AuthSession.instance.removeListener(_onSessionChanged);
+    super.dispose();
+  }
+
+  void _onSessionChanged() {
+    if (!AuthSession.instance.expired) return;
+    childrenStore.clear();
+    _navigatorKey.currentState?.popUntil((route) => route.isFirst);
+    _messengerKey.currentState?.showSnackBar(
+      const SnackBar(content: Text('Your session has expired. Please sign in again.')),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -18,6 +51,8 @@ class MyApp extends StatelessWidget {
     const Color softBlue = Color(0xFF0284C7);
 
     return MaterialApp(
+      navigatorKey: _navigatorKey,
+      scaffoldMessengerKey: _messengerKey,
       title: 'INTELLISCREEN',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
@@ -96,6 +131,8 @@ class _WelcomeLoginScreenState extends State<WelcomeLoginScreen> {
   // State variables for role selection and password visibility.
   UserRole _selectedRole = UserRole.parent;
   bool _isPasswordVisible = false;
+  bool _isAuthenticating = false;
+  final AuthApiService _authService = AuthApiService();
 
   @override
   void dispose() {
@@ -104,35 +141,56 @@ class _WelcomeLoginScreenState extends State<WelcomeLoginScreen> {
     super.dispose();
   }
 
-  /// Handles demo login action.
-  /// Seamlessly navigates to the Dashboard while preserving demo safety.
-  void _handleDemoLogin() {
-    // If fields are empty during testing, fill in helpful demo defaults
-    if (_emailController.text.trim().isEmpty) {
-      _emailController.text = _selectedRole == UserRole.parent
-          ? 'parent.demo@intelliscreen.org'
-          : 'teacher.demo@intelliscreen.org';
-    }
-    if (_passwordController.text.trim().isEmpty) {
-      _passwordController.text = 'demo123';
-    }
+  /// Signs in against the backend before opening the dashboard.
+  Future<void> _handleLogin() => _authenticate(
+        () => _authService.login(
+          email: _emailController.text.trim(),
+          password: _passwordController.text,
+        ),
+      );
 
-    final bool isValid = _formKey.currentState?.validate() ?? false;
-    if (!isValid) {
+  /// Creates an account on the backend, which also signs the user in.
+  Future<void> _registerAccount() => _authenticate(
+        () => _authService.register(
+          email: _emailController.text.trim(),
+          password: _passwordController.text,
+          role: _selectedRole == UserRole.teacher ? 'teacher' : 'parent',
+        ),
+      );
+
+  Future<void> _authenticate(Future<AuthUser> Function() request) async {
+    if (_isAuthenticating) return;
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    setState(() => _isAuthenticating = true);
+
+    final AuthUser user;
+    try {
+      user = await request();
+    } on ApiException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error.message)),
+        );
+      }
       return;
+    } finally {
+      if (mounted) setState(() => _isAuthenticating = false);
     }
 
-    final String enteredEmail = _emailController.text.trim();
-
-    // Navigate to the Dashboard screen
-    Navigator.of(context).push(
+    if (!mounted) return;
+    _passwordController.clear();
+    await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (context) => DashboardScreen(
-          role: _selectedRole,
-          email: enteredEmail,
+          role: user.role == 'teacher' ? UserRole.teacher : UserRole.parent,
+          email: user.email,
         ),
       ),
     );
+
+    // However the dashboard was closed, the session ends with it.
+    _authService.logout();
+    childrenStore.clear();
   }
 
   /// Displays help information explaining demo access and assistance.
@@ -162,15 +220,15 @@ class _WelcomeLoginScreenState extends State<WelcomeLoginScreen> {
               ),
               SizedBox(height: 8),
               Text(
-                '• Select your role: Parent (home progress tracking) or Teacher (classroom screening).\n'
-                '• Type any sample email and password, or tap "Sign In" directly to use demo credentials.\n'
-                '• Use the eye icon to preview password reveal/hide.\n'
-                '• Tapping "Sign In" will open the interactive Demo Dashboard.',
+                '• New here? Choose Parent or Teacher, enter your email and a password of at least 8 characters, then tap "Create an account".\n'
+                '• Returning? Enter the email and password you registered with and tap "Sign In".\n'
+                '• Your role comes from your account.\n'
+                '• The INTELLISCREEN backend must be running for sign-in to work.',
                 style: TextStyle(fontSize: 13, height: 1.5, color: Color(0xFF334155)),
               ),
               SizedBox(height: 12),
               Text(
-                'Official account credentials will be provisioned once backend integration is live.',
+                'You will need to sign in again after restarting the app.',
                 style: TextStyle(fontSize: 12, color: Color(0xFF64748B), fontStyle: FontStyle.italic),
               ),
             ],
@@ -279,12 +337,15 @@ class _WelcomeLoginScreenState extends State<WelcomeLoginScreen> {
                               children: [
                                 Icon(Icons.verified_outlined, size: 14, color: Color(0xFF0369A1)),
                                 SizedBox(width: 6),
-                                Text(
-                                  'Screening & Monitoring Tool • Non-Diagnostic',
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
-                                    color: Color(0xFF0369A1),
+                                Flexible(
+                                  child: Text(
+                                    'Screening & Monitoring Tool • Non-Diagnostic',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFF0369A1),
+                                    ),
                                   ),
                                 ),
                               ],
@@ -404,8 +465,8 @@ class _WelcomeLoginScreenState extends State<WelcomeLoginScreen> {
                               if (value == null || value.trim().isEmpty) {
                                 return 'Please enter your password';
                               }
-                              if (value.length < 6) {
-                                return 'Password must be at least 6 characters';
+                              if (value.length < 8) {
+                                return 'Password must be at least 8 characters';
                               }
                               return null;
                             },
@@ -414,7 +475,7 @@ class _WelcomeLoginScreenState extends State<WelcomeLoginScreen> {
 
                           // Login Button
                           ElevatedButton(
-                            onPressed: _handleDemoLogin,
+                            onPressed: _isAuthenticating ? null : _handleLogin,
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
@@ -427,6 +488,11 @@ class _WelcomeLoginScreenState extends State<WelcomeLoginScreen> {
                             ),
                           ),
                           const SizedBox(height: 12),
+
+                          TextButton(
+                            onPressed: _isAuthenticating ? null : _registerAccount,
+                            child: const Text('Create an account'),
+                          ),
 
                           // Help Signing In Link
                           TextButton(
@@ -481,7 +547,7 @@ class _WelcomeLoginScreenState extends State<WelcomeLoginScreen> {
 
 /// Dashboard screen displaying academic screening overview and quick access
 /// to learner profiles, screening sessions, results, and progress monitoring.
-class DashboardScreen extends StatelessWidget {
+class DashboardScreen extends StatefulWidget {
   final UserRole role;
   final String email;
 
@@ -492,14 +558,30 @@ class DashboardScreen extends StatelessWidget {
   });
 
   @override
+  State<DashboardScreen> createState() => _DashboardScreenState();
+}
+
+class _DashboardScreenState extends State<DashboardScreen> {
+  UserRole get role => widget.role;
+  String get email => widget.email;
+
+  @override
+  void initState() {
+    super.initState();
+    childrenStore.load();
+  }
+
+  void _openChildren() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (context) => const ChildrenScreen()),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
     const Color primaryTeal = Color(0xFF0D9488);
     final String roleTitle = role == UserRole.parent ? 'Parent / Caregiver' : 'Teacher / Educator';
     final String greetingName = role == UserRole.parent ? 'Parent' : 'Educator';
-
-    // Demo statistics clearly labeled
-    final String assessmentsDoneValue = role == UserRole.parent ? '3 Completed' : '19 Completed';
-    final String needFollowUpValue = role == UserRole.parent ? '1 Learner' : '4 Learners';
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
@@ -566,9 +648,16 @@ class DashboardScreen extends StatelessWidget {
           child: ListenableBuilder(
             listenable: childrenStore,
             builder: (context, _) {
-              final String totalChildrenValue = role == UserRole.parent
-                  ? '${childrenStore.count} Children'
-                  : '${childrenStore.count} Students';
+              final bool loaded = childrenStore.state == LoadState.ready;
+              final String totalChildrenValue = !loaded
+                  ? '—'
+                  : role == UserRole.parent
+                      ? '${childrenStore.count} Children'
+                      : '${childrenStore.count} Students';
+              final String assessmentsDoneValue =
+                  loaded ? '${childrenStore.completedAssessmentCount} Completed' : '—';
+              final String inProgressValue =
+                  loaded ? '${childrenStore.inProgressAssessmentCount} Open' : '—';
 
               return SingleChildScrollView(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
@@ -681,7 +770,7 @@ class DashboardScreen extends StatelessWidget {
                       ),
                       SizedBox(width: 8),
                       Text(
-                        '(Demo Data)',
+                        '(Saved Data)',
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w500,
@@ -718,10 +807,10 @@ class DashboardScreen extends StatelessWidget {
                                 ),
                                 const SizedBox(height: 8),
                                 _SummaryStatCard(
-                                  title: 'Follow-Up Needed',
-                                  value: needFollowUpValue,
-                                  subtitle: 'Recommended review',
-                                  icon: Icons.flag_outlined,
+                                  title: 'In Progress',
+                                  value: inProgressValue,
+                                  subtitle: 'Unfinished sessions',
+                                  icon: Icons.pending_outlined,
                                   accentColor: const Color(0xFFD97706),
                                   bgColor: const Color(0xFFFFFBEB),
                                 ),
@@ -753,10 +842,10 @@ class DashboardScreen extends StatelessWidget {
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: _SummaryStatCard(
-                                    title: 'Need Follow-Up',
-                                    value: needFollowUpValue,
-                                    subtitle: 'Review',
-                                    icon: Icons.flag_outlined,
+                                    title: 'In Progress',
+                                    value: inProgressValue,
+                                    subtitle: 'Unfinished',
+                                    icon: Icons.pending_outlined,
                                     accentColor: const Color(0xFFD97706),
                                     bgColor: const Color(0xFFFFFBEB),
                                   ),
@@ -765,6 +854,14 @@ class DashboardScreen extends StatelessWidget {
                             );
                     },
                   ),
+                  if (childrenStore.state == LoadState.error) ...[
+                    const SizedBox(height: 12),
+                    LoadErrorCard(
+                      title: 'Could not load saved data',
+                      message: childrenStore.error ?? 'Unknown error',
+                      onRetry: childrenStore.load,
+                    ),
+                  ],
                   const SizedBox(height: 28),
 
                   // Section Header: Core Tools & Actions
@@ -798,14 +895,8 @@ class DashboardScreen extends StatelessWidget {
                         : 'Review registered student rosters, grade levels, and individual notes.',
                     icon: Icons.people_alt_rounded,
                     accentColor: const Color(0xFF0D9488),
-                    badgeText: '${childrenStore.count} Profiles (Demo)',
-                    onTap: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (context) => const ChildrenScreen(),
-                        ),
-                      );
-                    },
+                    badgeText: loaded ? '${childrenStore.count} Profiles (Demo)' : 'Loading…',
+                    onTap: _openChildren,
                   ),
                   const SizedBox(height: 12),
 
@@ -813,29 +904,11 @@ class DashboardScreen extends StatelessWidget {
                   _SectionNavCard(
                     title: 'New Assessment',
                     description:
-                        'Initiate a structured screening session for reading fluency and letter formation.',
+                        'Choose a demo child to start or resume a structured screening session.',
                     icon: Icons.add_task_rounded,
                     accentColor: const Color(0xFF0284C7),
                     badgeText: 'Start Screening',
-                    onTap: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (context) => const FeaturePlaceholderScreen(
-                            featureTitle: 'New Assessment',
-                            featureIcon: Icons.add_task_rounded,
-                            accentColor: Color(0xFF0284C7),
-                            description:
-                                'The New Assessment workflow will guide educators and parents through non-diagnostic screening tasks tailored for early detection of dyslexia and dysgraphia indicators.',
-                            upcomingHighlights: [
-                              'Phonological awareness and letter-sound rapid naming activities',
-                              'Handwriting sample capture with stroke and letter formation rubrics',
-                              'Adaptive prompts designed to keep children engaged and calm',
-                              'Session pause and resume to suit learning paces',
-                            ],
-                          ),
-                        ),
-                      );
-                    },
+                    onTap: _openChildren,
                   ),
                   const SizedBox(height: 12),
 
@@ -846,7 +919,7 @@ class DashboardScreen extends StatelessWidget {
                         'Examine completed screening rubrics, risk indicator flags, and observation logs.',
                     icon: Icons.fact_check_outlined,
                     accentColor: const Color(0xFF0F766E),
-                    badgeText: role == UserRole.parent ? '3 Records (Demo)' : '19 Records (Demo)',
+                    badgeText: loaded ? '${childrenStore.resultCount} Saved Results' : 'Loading…',
                     onTap: () {
                       Navigator.of(context).push(
                         MaterialPageRoute(

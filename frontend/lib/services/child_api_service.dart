@@ -1,52 +1,72 @@
-import 'dart:convert';
+import '../models/assessment_activity.dart';
+import '../models/json_utils.dart';
+import '../models/progress.dart';
+import 'api_client.dart';
 
-import 'package:http/http.dart' as http;
-
+/// Child profiles, assessments, activity statuses and progress.
 class ChildApiService {
-  // Android emulator uses this address to reach your Ubuntu machine.
-  // For Flutter Web or a Linux desktop app, use 127.0.0.1 instead.
-  static const String baseUrl = 'http://127.0.0.1:8000/api/v1';
+  ChildApiService({this._client});
 
-  Future<List<Map<String, dynamic>>> getChildren() async {
-    final response = await http.get(
-      Uri.parse('$baseUrl/children/'),
-    );
+  final ApiClient? _client;
+  ApiClient get client => _client ?? ApiClient.shared;
 
-    if (response.statusCode == 200) {
-      final List<dynamic> data = jsonDecode(response.body) as List<dynamic>;
-
-      return data
-          .map((child) => Map<String, dynamic>.from(child as Map))
-          .toList();
-    }
-
-    throw Exception(
-      'Failed to load children: ${response.statusCode} ${response.body}',
+  Future<List<BackendChild>> getChildren() async {
+    final data = await client.get('/children/');
+    return client.parse(
+      () => asJsonList(data).map((item) => BackendChild.fromJson(asJsonMap(item))).toList(),
     );
   }
 
+  /// The account's in-progress assessment for this child, if there is one.
+  Future<AssessmentSummary?> findActiveAssessment(int childId) async {
+    final data = await client.get('/assessments/', query: {
+      'child_id': '$childId',
+      'status': AssessmentStatus.inProgress.apiValue,
+    });
+    final assessments = client.parse(
+      () => asJsonList(data)
+          .map((item) => AssessmentSummary.fromAssessmentJson(asJsonMap(item)))
+          .toList(),
+    );
+    return assessments.isEmpty ? null : assessments.last;
+  }
 
-  Future<Map<String, dynamic>> createChild({
-    required String participantCode,
-    int? ageYears,
+  /// Starts an assessment; the backend returns the open one if it already exists.
+  Future<AssessmentSummary> startAssessment(int childId) async {
+    final data = await client.post('/assessments/', {
+      'child_id': childId,
+      'assessment_type': 'screening',
+    });
+    return client.parse(() => AssessmentSummary.fromAssessmentJson(asJsonMap(data)));
+  }
+
+  Future<ActivityStatus> setActivityStatus({
+    required int assessmentId,
+    required String activityKey,
+    required ActivityStatus status,
   }) async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/children/'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'participant_code': participantCode,
-        'age_years': ageYears,
-      }),
+    final data = await client.put(
+      '/assessments/$assessmentId/activities/${Uri.encodeComponent(activityKey)}',
+      {'status': status.apiValue},
     );
-
-    if (response.statusCode == 201) {
-      return Map<String, dynamic>.from(
-        jsonDecode(response.body) as Map,
-      );
-    }
-
-    throw Exception(
-      'Failed to create child: ${response.statusCode} ${response.body}',
+    return client.parse(
+      () => ActivityStatusApi.fromApi(readString(asJsonMap(data), 'status')),
     );
+  }
+
+  Future<AssessmentSummary> updateAssessmentStatus({
+    required int assessmentId,
+    required AssessmentStatus status,
+  }) async {
+    final data = await client.patch(
+      '/assessments/$assessmentId/status',
+      {'status': status.apiValue},
+    );
+    return client.parse(() => AssessmentSummary.fromAssessmentJson(asJsonMap(data)));
+  }
+
+  Future<ChildProgress> getProgress(int childId) async {
+    final data = await client.get('/progress/$childId');
+    return client.parse(() => ChildProgress.fromJson(asJsonMap(data)));
   }
 }

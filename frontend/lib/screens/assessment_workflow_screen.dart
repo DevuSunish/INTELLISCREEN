@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 import '../models/child_record.dart';
+import '../services/api_client.dart';
+import '../state/assessment_controller.dart';
 import 'activity_detail_screen.dart';
+import 'children_screen.dart' show LoadErrorCard;
 
 /// Screen managing the multi-activity assessment workflow for a specific child.
 /// Coordinates session status across five screening activities:
 /// Handwriting, Reading, Phonological Awareness, RAN, and Memory.
-class AssessmentWorkflowScreen extends StatelessWidget {
+/// The assessment and every activity status are saved to the backend.
+class AssessmentWorkflowScreen extends StatefulWidget {
   final ChildRecord child;
 
   const AssessmentWorkflowScreen({
@@ -13,45 +17,100 @@ class AssessmentWorkflowScreen extends StatelessWidget {
     required this.child,
   });
 
-  /// Completes the session, saves a demo log record to the child's history, and returns.
-  void _completeSession(BuildContext context) {
-    childrenStore.completeSession(child.id);
+  @override
+  State<AssessmentWorkflowScreen> createState() => _AssessmentWorkflowScreenState();
+}
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        backgroundColor: const Color(0xFF0D9488),
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        content: Row(
-          children: [
-            const Icon(Icons.check_circle_outline, color: Colors.white, size: 20),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                'Assessment session completed and saved for ${child.name}.',
-                style: const TextStyle(fontWeight: FontWeight.w500),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+class _AssessmentWorkflowScreenState extends State<AssessmentWorkflowScreen> {
+  late final AssessmentController _controller = AssessmentController(child: widget.child);
 
-    Navigator.of(context).pop();
+  ChildRecord get child => widget.child;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.load();
   }
 
-  /// Prompts confirmation to reset the in-memory session.
-  void _resetSession(BuildContext context) {
-    childrenStore.resetSession(child.id, child.name);
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
+  void _showMessage(String message, {bool isError = false}) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        backgroundColor: const Color(0xFF64748B),
+        backgroundColor: isError ? const Color(0xFFB91C1C) : const Color(0xFF0D9488),
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        content: Text('Session reset to "Not Started" for ${child.name}.'),
+        content: Text(message, style: const TextStyle(fontWeight: FontWeight.w500)),
       ),
     );
+  }
+
+  Future<void> _startAssessment() async {
+    try {
+      await _controller.start();
+      _showMessage('Assessment started for ${child.name}. Progress is saved as you go.');
+    } on ApiException catch (error) {
+      _showMessage('Could not start the assessment: $error', isError: true);
+    }
+  }
+
+  /// Marks the saved assessment completed; the backend checks every activity is done.
+  Future<void> _completeSession() async {
+    try {
+      await _controller.complete();
+    } on ApiException catch (error) {
+      _showMessage('Could not complete the assessment: $error', isError: true);
+      return;
+    }
+
+    try {
+      await childrenStore.refreshProgress(child);
+    } on ApiException {
+      // The profile screen reloads progress and shows any error itself.
+    }
+
+    _showMessage(
+      'Assessment completed and saved for ${child.name}. '
+      'No screening result was generated because the screening model is not connected.',
+    );
+    if (mounted) Navigator.of(context).pop();
+  }
+
+  /// Cancels the in-progress assessment after confirmation.
+  Future<void> _cancelAssessment() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Cancel this assessment?'),
+        content: const Text(
+          'The assessment stays in the history as cancelled and its activities can no longer be changed. '
+          'You can start a new assessment afterwards.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Keep Assessment'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Cancel Assessment'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      await _controller.cancel();
+      _showMessage('Assessment cancelled for ${child.name}.');
+    } on ApiException catch (error) {
+      _showMessage('Could not cancel the assessment: $error', isError: true);
+    }
   }
 
   @override
@@ -78,11 +137,15 @@ class AssessmentWorkflowScreen extends StatelessWidget {
           ),
         ),
         actions: [
-          // Reset session demo action
-          IconButton(
-            tooltip: 'Reset Session Activities',
-            icon: const Icon(Icons.restart_alt_rounded, color: Color(0xFF64748B)),
-            onPressed: () => _resetSession(context),
+          ListenableBuilder(
+            listenable: _controller,
+            builder: (context, _) => IconButton(
+              tooltip: 'Cancel Assessment',
+              icon: const Icon(Icons.cancel_outlined, color: Color(0xFF64748B)),
+              onPressed: _controller.hasActiveAssessment && !_controller.busy
+                  ? _cancelAssessment
+                  : null,
+            ),
           ),
           const SizedBox(width: 8),
         ],
@@ -94,13 +157,14 @@ class AssessmentWorkflowScreen extends StatelessWidget {
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 620),
               child: ListenableBuilder(
-                listenable: childrenStore,
+                listenable: _controller,
                 builder: (context, _) {
-                  // Get or initialize active session for this specific child
-                  final session = childrenStore.getOrCreateSessionForChild(child);
-                  final int completedCount = session.completedCount;
+                  final activities = _controller.activities;
+                  final int completedCount = _controller.completedCount;
                   final double progressPercent =
-                      session.activities.isEmpty ? 0.0 : completedCount / session.activities.length;
+                      activities.isEmpty ? 0.0 : completedCount / activities.length;
+                  final bool active = _controller.hasActiveAssessment;
+                  final bool busy = _controller.busy;
 
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -174,7 +238,7 @@ class AssessmentWorkflowScreen extends StatelessWidget {
                                   ),
                                   const SizedBox(height: 3),
                                   Text(
-                                    '${child.grade} • Age ${child.age} yrs • ID: ${child.id}',
+                                    '${child.grade} • ${child.ageLabel} • ID: ${child.participantCode}',
                                     style: const TextStyle(
                                       fontSize: 12,
                                       color: Color(0xFF64748B),
@@ -220,7 +284,7 @@ class AssessmentWorkflowScreen extends StatelessWidget {
                                     borderRadius: BorderRadius.circular(10),
                                   ),
                                   child: Text(
-                                    session.statusLabel,
+                                    _controller.statusLabel,
                                     style: const TextStyle(
                                       color: Colors.white,
                                       fontSize: 11,
@@ -242,7 +306,7 @@ class AssessmentWorkflowScreen extends StatelessWidget {
                             ),
                             const SizedBox(height: 8),
                             Text(
-                              '$completedCount of ${session.activities.length} activities completed',
+                              '$completedCount of ${activities.length} activities completed',
                               style: TextStyle(
                                 color: Colors.white.withValues(alpha: 0.95),
                                 fontSize: 12,
@@ -268,7 +332,7 @@ class AssessmentWorkflowScreen extends StatelessWidget {
                             SizedBox(width: 8),
                             Expanded(
                               child: Text(
-                                'Temporary Session State • Records are stored in memory for this demo and not permanently saved.',
+                                'Saved to the INTELLISCREEN backend • The assessment and each activity status are stored as you go and restored when you return.',
                                 style: TextStyle(
                                   fontSize: 11,
                                   color: Color(0xFF166534),
@@ -279,6 +343,68 @@ class AssessmentWorkflowScreen extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 20),
+
+                      if (_controller.loading)
+                        const Padding(
+                          padding: EdgeInsets.only(bottom: 16),
+                          child: LinearProgressIndicator(),
+                        )
+                      else if (_controller.loadError != null) ...[
+                        LoadErrorCard(
+                          title: 'Could not load saved assessment progress',
+                          message: _controller.loadError!,
+                          onRetry: _controller.load,
+                        ),
+                        const SizedBox(height: 16),
+                      ] else if (!active) ...[
+                        Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: const Color(0xFFE2E8F0)),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              const Text(
+                                'No assessment in progress',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF0F172A),
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              const Text(
+                                'Start an assessment to record activity progress. You can preview the activities below at any time.',
+                                style: TextStyle(fontSize: 12, height: 1.4, color: Color(0xFF64748B)),
+                              ),
+                              const SizedBox(height: 12),
+                              ElevatedButton.icon(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: primaryTeal,
+                                  foregroundColor: Colors.white,
+                                  minimumSize: const Size.fromHeight(46),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                                onPressed: busy ? null : _startAssessment,
+                                icon: busy
+                                    ? const SizedBox(
+                                        width: 16,
+                                        height: 16,
+                                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                      )
+                                    : const Icon(Icons.play_arrow_rounded, size: 20),
+                                label: const Text('Start Assessment'),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
 
                       // Section Header
                       Row(
@@ -304,14 +430,15 @@ class AssessmentWorkflowScreen extends StatelessWidget {
                       const SizedBox(height: 10),
 
                       // 2. The Five Assessment Activity Cards
-                      ...session.activities.map(
+                      ...activities.map(
                         (activity) => _ActivityCardItem(
                           activity: activity,
+                          status: _controller.statusOf(activity.id),
                           onTap: () {
                             Navigator.of(context).push(
                               MaterialPageRoute(
                                 builder: (context) => ActivityDetailScreen(
-                                  child: child,
+                                  controller: _controller,
                                   activity: activity,
                                 ),
                               ),
@@ -331,15 +458,23 @@ class AssessmentWorkflowScreen extends StatelessWidget {
                             borderRadius: BorderRadius.circular(12),
                           ),
                         ),
-                        onPressed: () => _completeSession(context),
+                        onPressed: active && _controller.allActivitiesCompleted && !busy
+                            ? _completeSession
+                            : null,
                         icon: const Icon(Icons.check_circle_outline_rounded, size: 20),
-                        label: Text(
-                          completedCount == session.activities.length
-                              ? 'Complete & Save Screening Session'
-                              : 'Save Session & Finish (Demo)',
-                          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+                        label: const Text(
+                          'Complete & Save Screening Session',
+                          style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
                         ),
                       ),
+                      if (active && !_controller.allActivitiesCompleted) ...[
+                        const SizedBox(height: 6),
+                        const Text(
+                          'Mark all five activities as completed to finish the assessment.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                        ),
+                      ],
                       const SizedBox(height: 10),
 
                       // Return to Profile button
@@ -384,10 +519,12 @@ class AssessmentWorkflowScreen extends StatelessWidget {
 /// Card representing an individual screening activity in the session.
 class _ActivityCardItem extends StatelessWidget {
   final AssessmentActivity activity;
+  final ActivityStatus status;
   final VoidCallback onTap;
 
   const _ActivityCardItem({
     required this.activity,
+    required this.status,
     required this.onTap,
   });
 
@@ -444,24 +581,24 @@ class _ActivityCardItem extends StatelessWidget {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                           decoration: BoxDecoration(
-                            color: activity.status.bgColor,
+                            color: status.bgColor,
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Icon(
-                                activity.status.icon,
+                                status.icon,
                                 size: 11,
-                                color: activity.status.textColor,
+                                color: status.textColor,
                               ),
                               const SizedBox(width: 4),
                               Text(
-                                activity.status.label,
+                                status.label,
                                 style: TextStyle(
                                   fontSize: 10,
                                   fontWeight: FontWeight.w700,
-                                  color: activity.status.textColor,
+                                  color: status.textColor,
                                 ),
                               ),
                             ],

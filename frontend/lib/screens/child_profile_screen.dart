@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import '../models/child_record.dart';
+import '../models/json_utils.dart';
+import '../services/api_client.dart';
 import 'assessment_workflow_screen.dart';
+import 'children_screen.dart' show LoadErrorCard;
 
 /// Screen displaying an individual child's details, screening history, and entry points.
-/// Transparently shows an empty state for assessments without fabricating diagnostic claims.
-class ChildProfileScreen extends StatelessWidget {
+/// History comes from the backend; no diagnostic claims are fabricated.
+class ChildProfileScreen extends StatefulWidget {
   final ChildRecord child;
 
   const ChildProfileScreen({
@@ -12,17 +15,52 @@ class ChildProfileScreen extends StatelessWidget {
     required this.child,
   });
 
-  /// Navigates to the assessment workflow placeholder for this child.
-  void _navigateToAssessmentWorkflow(BuildContext context) {
-    Navigator.of(context).push(
+  @override
+  State<ChildProfileScreen> createState() => _ChildProfileScreenState();
+}
+
+class _ChildProfileScreenState extends State<ChildProfileScreen> {
+  ChildRecord get child => widget.child;
+
+  ChildProgress? _progress;
+  bool _loading = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _progress = childrenStore.progressFor(child);
+    _loadProgress();
+  }
+
+  Future<void> _loadProgress() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final progress = await childrenStore.refreshProgress(child);
+      if (mounted) setState(() => _progress = progress);
+    } on ApiException catch (error) {
+      if (mounted) setState(() => _error = error.message);
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  /// Opens the assessment workflow, then reloads saved progress.
+  Future<void> _navigateToAssessmentWorkflow(BuildContext context) async {
+    await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (context) => AssessmentWorkflowScreen(child: child),
       ),
     );
+    if (mounted) await _loadProgress();
   }
 
   /// Displays an informational dialog explaining longitudinal progress tracking requirements.
   void _showProgressTrackingPreview(BuildContext context) {
+    final progress = _progress;
     showDialog<void>(
       context: context,
       builder: (BuildContext context) {
@@ -62,6 +100,16 @@ class ChildProfileScreen extends StatelessWidget {
                 style: TextStyle(fontSize: 12, height: 1.5, color: Color(0xFF475569)),
               ),
               const SizedBox(height: 12),
+              Text(
+                progress == null
+                    ? 'Saved progress could not be loaded.'
+                    : 'Saved sessions: ${progress.totalAssessments} • '
+                        'Completed: ${progress.completedAssessments} • '
+                        'In progress: ${progress.inProgressAssessments} • '
+                        'Screening results: ${progress.resultsAvailable}',
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF0F172A)),
+              ),
+              const SizedBox(height: 12),
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
@@ -75,7 +123,7 @@ class ChildProfileScreen extends StatelessWidget {
                     SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Zero fabricated results. Graphs will generate organically from verified screening logs.',
+                        'Zero fabricated results. Counts come only from saved screening records.',
                         style: TextStyle(fontSize: 11, color: Color(0xFF334155)),
                       ),
                     ),
@@ -106,7 +154,7 @@ class ChildProfileScreen extends StatelessWidget {
 
     // Format registration date string
     final String registeredText =
-        '${child.registeredDate.month}/${child.registeredDate.day}/${child.registeredDate.year}';
+        child.registeredDate != null ? formatDate(child.registeredDate!) : 'Not recorded';
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
@@ -208,7 +256,7 @@ class ChildProfileScreen extends StatelessWidget {
                                     ),
                                     const SizedBox(height: 4),
                                     Text(
-                                      '${child.grade} • Age ${child.age} • ${child.gender}',
+                                      '${child.grade} • ${child.ageLabel} • ${child.gender}',
                                       style: const TextStyle(
                                         fontSize: 13,
                                         fontWeight: FontWeight.w500,
@@ -245,7 +293,7 @@ class ChildProfileScreen extends StatelessWidget {
                           const SizedBox(height: 10),
                           _DetailPill(
                             label: 'Status',
-                            value: child.assessmentStatus,
+                            value: _progress?.statusSummary ?? 'Status unavailable',
                             icon: Icons.verified_outlined,
                           ),
 
@@ -263,7 +311,7 @@ class ChildProfileScreen extends StatelessWidget {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   const Text(
-                                    'Observational Notes:',
+                                    'Demo Profile Notes (illustrative, not saved data):',
                                     style: TextStyle(
                                       fontSize: 11,
                                       fontWeight: FontWeight.w700,
@@ -355,14 +403,28 @@ class ChildProfileScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 10),
 
-                  // Reactive state using ChildrenStore
-                  ListenableBuilder(
-                    listenable: childrenStore,
-                    builder: (context, _) {
-                      // Fetch actual assessment records associated strictly with this child
-                      final assessments = childrenStore.getAssessmentsForChild(child.id);
+                  Builder(
+                    builder: (context) {
+                      final progress = _progress;
 
-                      // EMPTY STATE: If the child has no assessments
+                      if (progress == null && _loading) {
+                        return const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 32),
+                          child: Center(child: CircularProgressIndicator()),
+                        );
+                      }
+
+                      if (progress == null) {
+                        return LoadErrorCard(
+                          title: 'Could not load assessment history',
+                          message: _error ?? 'Unknown error',
+                          onRetry: _loadProgress,
+                        );
+                      }
+
+                      final assessments = progress.history;
+
+                      // EMPTY STATE: If the child has no saved assessments
                       if (assessments.isEmpty) {
                         return Card(
                           elevation: 0,
@@ -436,7 +498,7 @@ class ChildProfileScreen extends StatelessWidget {
                         );
                       }
 
-                      // NON-EMPTY STATE: Display actual available records for this child
+                      // NON-EMPTY STATE: Display saved records for this child
                       return Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
@@ -449,7 +511,7 @@ class ChildProfileScreen extends StatelessWidget {
                                   borderRadius: BorderRadius.circular(6),
                                 ),
                                 child: Text(
-                                  '${assessments.length} Record${assessments.length > 1 ? 's' : ''} (Demo)',
+                                  '${assessments.length} Saved Record${assessments.length > 1 ? 's' : ''}',
                                   style: const TextStyle(
                                     fontSize: 11,
                                     fontWeight: FontWeight.w700,
@@ -478,6 +540,14 @@ class ChildProfileScreen extends StatelessWidget {
                       );
                     },
                   ),
+                  if (_progress != null && _error != null) ...[
+                    const SizedBox(height: 10),
+                    LoadErrorCard(
+                      title: 'Could not refresh assessment history',
+                      message: _error!,
+                      onRetry: _loadProgress,
+                    ),
+                  ],
                   const SizedBox(height: 20),
 
                   // Non-diagnostic transparent disclaimer
@@ -516,9 +586,9 @@ class ChildProfileScreen extends StatelessWidget {
   }
 }
 
-/// Card displaying an individual assessment record associated with a child.
+/// Card displaying a saved assessment of a child, as returned by the backend.
 class _AssessmentCardItem extends StatelessWidget {
-  final AssessmentRecord record;
+  final AssessmentSummary record;
 
   const _AssessmentCardItem({required this.record});
 
@@ -528,22 +598,27 @@ class _AssessmentCardItem extends StatelessWidget {
     Color statusTextColor;
     IconData statusIcon;
 
-    if (record.status.contains('Follow-up')) {
-      statusBgColor = const Color(0xFFFEF3C7);
-      statusTextColor = const Color(0xFFB45309);
-      statusIcon = Icons.flag_outlined;
-    } else if (record.status.contains('Completed')) {
-      statusBgColor = const Color(0xFFCCFBF1);
-      statusTextColor = const Color(0xFF0F766E);
-      statusIcon = Icons.check_circle_outline_rounded;
-    } else {
-      statusBgColor = const Color(0xFFF1F5F9);
-      statusTextColor = const Color(0xFF475569);
-      statusIcon = Icons.schedule_rounded;
+    switch (record.status) {
+      case AssessmentStatus.completed:
+        statusBgColor = const Color(0xFFCCFBF1);
+        statusTextColor = const Color(0xFF0F766E);
+        statusIcon = Icons.check_circle_outline_rounded;
+      case AssessmentStatus.inProgress:
+        statusBgColor = const Color(0xFFE0F2FE);
+        statusTextColor = const Color(0xFF0369A1);
+        statusIcon = Icons.pending_outlined;
+      case AssessmentStatus.cancelled:
+        statusBgColor = const Color(0xFFF1F5F9);
+        statusTextColor = const Color(0xFF475569);
+        statusIcon = Icons.cancel_outlined;
     }
 
-    final String formattedDate =
-        '${record.date.month}/${record.date.day}/${record.date.year}';
+    final completedOn = record.completedAt;
+    final String dateText = completedOn != null
+        ? 'Completed on ${formatDate(completedOn)}'
+        : 'Started on ${formatDate(record.createdAt)}';
+    final activities = ScreeningActivities.all;
+    final result = record.result;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -581,7 +656,7 @@ class _AssessmentCardItem extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        record.title,
+                        'Screening Session #${record.id}',
                         style: const TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w700,
@@ -590,7 +665,7 @@ class _AssessmentCardItem extends StatelessWidget {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        'Conducted on $formattedDate • ${record.conductedBy}',
+                        dateText,
                         style: const TextStyle(
                           fontSize: 11,
                           color: Color(0xFF64748B),
@@ -611,7 +686,7 @@ class _AssessmentCardItem extends StatelessWidget {
                       Icon(statusIcon, size: 12, color: statusTextColor),
                       const SizedBox(width: 4),
                       Text(
-                        record.status,
+                        record.status.label,
                         style: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.w700,
@@ -637,7 +712,7 @@ class _AssessmentCardItem extends StatelessWidget {
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
-                      'Protocol: ${record.assessmentType}',
+                      'Activities completed: ${record.completedActivityCount} of ${activities.length}',
                       style: const TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w600,
@@ -648,25 +723,74 @@ class _AssessmentCardItem extends StatelessWidget {
                 ],
               ),
             ),
-            if (record.observationalSummary != null &&
-                record.observationalSummary!.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              const Text(
-                'Observational Checkpoint:',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: Color(0xFF475569),
-                ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                for (final activity in activities)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: record.statusOf(activity.id).bgColor,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          record.statusOf(activity.id).icon,
+                          size: 11,
+                          color: record.statusOf(activity.id).textColor,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          activity.title,
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            color: record.statusOf(activity.id).textColor,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              'Screening Result:',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF475569),
               ),
-              const SizedBox(height: 2),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              result != null
+                  ? [
+                      'Category: ${result.resultCategory ?? 'not provided'}',
+                      if (result.confidenceScore != null)
+                        'Confidence: ${(result.confidenceScore! * 100).toStringAsFixed(0)}%',
+                      if (result.modelVersion != null) 'Model: ${result.modelVersion}',
+                    ].join(' • ')
+                  : record.status == AssessmentStatus.completed
+                      ? 'No screening result has been generated. The automated screening model is not connected yet, so completing activities does not produce a result.'
+                      : 'No result. Results can only be added to completed assessments.',
+              style: const TextStyle(
+                fontSize: 12,
+                height: 1.4,
+                color: Color(0xFF334155),
+              ),
+            ),
+            if (result != null && result.modalityScores.isNotEmpty) ...[
+              const SizedBox(height: 4),
               Text(
-                record.observationalSummary!,
-                style: const TextStyle(
-                  fontSize: 12,
-                  height: 1.4,
-                  color: Color(0xFF334155),
-                ),
+                result.modalityScores.entries
+                    .map((entry) => '${entry.key}: ${(entry.value * 100).toStringAsFixed(0)}%')
+                    .join(' • '),
+                style: const TextStyle(fontSize: 11, color: Color(0xFF475569)),
               ),
             ],
             const SizedBox(height: 8),
