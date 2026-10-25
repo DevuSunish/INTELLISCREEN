@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/child_record.dart';
+import '../services/child_api_service.dart';
 
 /// Screen allowing parents or educators to register a new child profile.
 /// Saves to temporary in-memory session state without persisting to a backend.
@@ -12,6 +13,8 @@ class AddChildScreen extends StatefulWidget {
 
 class _AddChildScreenState extends State<AddChildScreen> {
   final _formKey = GlobalKey<FormState>();
+  final ChildApiService _childApiService = ChildApiService();
+bool _isSavingToBackend = false;
 
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _ageController = TextEditingController();
@@ -145,6 +148,56 @@ class _AddChildScreenState extends State<AddChildScreen> {
 
     Navigator.of(context).pop();
   }
+  Future<void> _saveBackendProfile() async {
+  if (_isSavingToBackend) return;
+
+  final bool isValid = _formKey.currentState?.validate() ?? false;
+  if (!isValid) return;
+
+  final int? age = int.tryParse(_ageController.text.trim());
+  if (age == null) return;
+
+  final String participantCode = _nameController.text.trim();
+
+  setState(() {
+    _isSavingToBackend = true;
+  });
+
+  try {
+    final profile = await _childApiService.createChild(
+      participantCode: participantCode,
+      ageYears: age,
+    );
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Backend profile created: ${profile['participant_code']}',
+        ),
+      ),
+    );
+
+    Navigator.of(context).pop();
+  } catch (error) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Could not create backend profile: $error'),
+        backgroundColor: Colors.red,
+      ),
+    );
+  } finally {
+    if (mounted) {
+      setState(() {
+        _isSavingToBackend = false;
+      });
+    }
+  }
+}
+  
 
   @override
   Widget build(BuildContext context) {
@@ -466,7 +519,7 @@ class _AddChildScreenState extends State<AddChildScreen> {
                             const SizedBox(height: 28),
 
                             // Submit Button
-                            ElevatedButton(
+                          ElevatedButton(
                               onPressed: _saveChildProfile,
                               child: const Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
@@ -475,6 +528,30 @@ class _AddChildScreenState extends State<AddChildScreen> {
                                   SizedBox(width: 8),
                                   Text('Save to Demo Session'),
                                 ],
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+
+                            OutlinedButton.icon(
+                              onPressed: _isSavingToBackend
+                                  ? null
+                                  : _saveBackendProfile,
+                              icon: _isSavingToBackend
+                                  ? const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Icon(Icons.cloud_upload_outlined),
+                              label: Text(
+                                _isSavingToBackend
+                                    ? 'Saving Backend Profile...'
+                                    : 'Save Anonymized Backend Profile',
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                minimumSize: const Size.fromHeight(48),
                               ),
                             ),
                             const SizedBox(height: 12),

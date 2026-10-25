@@ -75,3 +75,4 @@ htmlcov/
 # Editor and operating system files
 .vscode/
 *.swp
+frontend/build/

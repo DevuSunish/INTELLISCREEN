@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/child_record.dart';
 import 'add_child_screen.dart';
 import 'child_profile_screen.dart';
+import '../services/child_api_service.dart';
 
 /// Screen displaying the list of registered child profiles.
 /// Supports adding new sample learners into temporary in-memory state.
@@ -60,6 +61,9 @@ class ChildrenScreen extends StatelessWidget {
                 return ListView(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
                   children: [
+                    const BackendChildrenSection(),
+  const SizedBox(height: 16),
+
                     // Header Card
                     Container(
                       padding: const EdgeInsets.all(18),
@@ -390,6 +394,127 @@ class _ChildCardItem extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Displays anonymized child profiles retrieved from the backend API.
+class BackendChildrenSection extends StatefulWidget {
+  const BackendChildrenSection({super.key});
+
+  @override
+  State<BackendChildrenSection> createState() =>
+      _BackendChildrenSectionState();
+}
+
+class _BackendChildrenSectionState extends State<BackendChildrenSection> {
+  final ChildApiService _apiService = ChildApiService();
+
+  late Future<List<Map<String, dynamic>>> _childrenFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _childrenFuture = _apiService.getChildren();
+  }
+
+  void _reloadChildren() {
+    setState(() {
+      _childrenFuture = _apiService.getChildren();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'Backend Profiles',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Refresh backend profiles',
+                  onPressed: _reloadChildren,
+                  icon: const Icon(Icons.refresh),
+                ),
+              ],
+            ),
+            const Text(
+              'Anonymized participant records stored by the backend.',
+              style: TextStyle(fontSize: 12),
+            ),
+            const SizedBox(height: 12),
+            FutureBuilder<List<Map<String, dynamic>>>(
+              future: _childrenFuture,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(16),
+                      child: CircularProgressIndicator(),
+                    ),
+                  );
+                }
+
+                if (snapshot.hasError) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Could not load backend profiles.',
+                        style: TextStyle(color: Colors.red),
+                      ),
+                      const SizedBox(height: 8),
+                      TextButton(
+                        onPressed: _reloadChildren,
+                        child: const Text('Try again'),
+                      ),
+                    ],
+                  );
+                }
+
+                final children = snapshot.data ?? [];
+
+                if (children.isEmpty) {
+                  return const Text('No backend profiles found.');
+                }
+
+                return Column(
+                  children: children.map((child) {
+                    final participantCode =
+                        child['participant_code']?.toString() ??
+                        'Unknown participant';
+                    final age = child['age_years'];
+
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const CircleAvatar(
+                        child: Icon(Icons.person_outline),
+                      ),
+                      title: Text(participantCode),
+                      subtitle: Text(
+                        age == null ? 'Age not provided' : 'Age $age years',
+                      ),
+                    );
+                  }).toList(),
+                );
+              },
+            ),
+          ],
         ),
       ),
     );
