@@ -46,3 +46,34 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+.intelliscreen_secret
+
+# Test and coverage files
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Editor and operating system files
+.vscode/
+*.swp
+frontend/build/
